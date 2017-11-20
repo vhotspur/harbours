@@ -44,7 +44,7 @@ build() {
 		AR="$HSCT_AR" \
 		RANLIB="$HSCT_RANLIB" \
 		./configure \
-			--static
+			--static || return 1
 	run make -j$shipfunnels STATIC_ONLY=y
 }
 

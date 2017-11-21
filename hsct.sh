@@ -67,6 +67,7 @@ HSCT_ARCHIVE_DIR="`pwd`/archives/"
 HSCT_DISABLED_CFLAGS="-Werror -Werror-implicit-function-declaration -fno-common"
 HSCT_DISABLED_LDFLAGS="--fatal-warnings"
 HSCT_CACHE_DIR=`pwd`/helenos
+HSCT_OPTS_NO_FILE_DOWNLOADING=false
 
 # Print short help.
 # Does not exit the whole script.
@@ -141,7 +142,6 @@ hsct_is_helenos_configured() {
 
 hsct_process_harbour_opts() {
 	HSCT_OPTS_NO_DEPENDENCY_BUILDING=false
-	HSCT_OPTS_NO_FILE_DOWNLOADING=false
 	HSCT_HARBOUR_NAME=""
 	
 	while echo "$1" | grep -q '^--'; do
@@ -173,33 +173,40 @@ hsct_get_config() {
 		| sed -e 's/^[ \t]*//' -e 's/[ \t]*$//'
 }
 
+hsct_fetch_file() {
+	_filename=`basename "$1"`
+	if [ "$_filename" = "$1" ]; then
+	    return 0
+	fi
+	
+	mkdir -p "$HSCT_SOURCES_DIR"
+	
+	if ! [ -r "$HSCT_SOURCES_DIR/$_filename" ]; then
+	    if $HSCT_OPTS_NO_FILE_DOWNLOADING; then
+	        hsct_error "File $_filename missing, cannot continue."
+	        hsct_error2 "Build without --no-fetch."
+	        return 1
+	    fi
+	    
+	    hsct_info2 "Fetching $_filename..."
+	    # Remove the file even on Ctrl-C when fetching
+	    trap "rm -f \"$HSCT_SOURCES_DIR/$_filename\"; echo" SIGINT SIGQUIT
+	    if ! wget $HSCT_WGET_OPTS "$1" -O "$HSCT_SOURCES_DIR/$_filename"; then
+	        rm -f "$HSCT_SOURCES_DIR/$_filename"
+	        hsct_error "Failed to fetch $_url."
+	        return 1
+	    fi
+	    trap - SIGINT SIGQUIT
+	fi
+	# TODO: md5
+    return 0
+}
+
 # Fetch all the specified files in the HARBOUR
 hsct_fetch() {
-	mkdir -p "$HSCT_SOURCES_DIR"
 	hsct_info "Fetching sources..."
 	for _url in $shipsources; do
-		_filename=`basename "$_url"`
-		if [ "$_filename" = "$_url" ]; then
-			continue
-		fi
-		if ! [ -r "$HSCT_SOURCES_DIR/$_filename" ]; then
-			if $HSCT_OPTS_NO_FILE_DOWNLOADING; then
-				hsct_error "File $_filename missing, cannot continue."
-				hsct_error2 "Build without --no-fetch."
-				return 1
-			fi
-			
-			hsct_info2 "Fetching $_filename..."
-			# Remove the file even on Ctrl-C when fetching
-			trap "rm -f \"$HSCT_SOURCES_DIR/$_filename\"; echo" SIGINT SIGQUIT
-			if ! wget $HSCT_WGET_OPTS "$_url" -O "$HSCT_SOURCES_DIR/$_filename"; then
-				rm -f "$HSCT_SOURCES_DIR/$_filename"
-				hsct_error "Failed to fetch $_url."
-				return 1
-			fi
-			trap - SIGINT SIGQUIT
-		fi
-		# TODO - check MD5
+		hsct_fetch_file "$_url"
 	done
 	return 0
 }

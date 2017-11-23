@@ -1,0 +1,13 @@
+diff --git a/configure b/configure
+index 7dae2bb8..1b843218 100755
+--- a/configure
++++ b/configure
+@@ -327,7 +327,7 @@ mips*) ARCH=mips ;;
+ microblaze*) ARCH=microblaze ;;
+ or1k*) ARCH=or1k ;;
+ powerpc64*) ARCH=powerpc64 ;;
+-powerpc*) ARCH=powerpc ;;
++powerpc*|ppc-*) ARCH=powerpc ;;
+ sh[1-9bel-]*|sh|superh*) ARCH=sh ;;
+ s390x*) ARCH=s390x ;;
+ unknown) fail "$0: unable to detect target arch; try $0 --target=..." ;;

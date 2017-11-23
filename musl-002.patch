@@ -1,0 +1,13 @@
+diff --git a/src/internal/syscall.h b/src/internal/syscall.h
+index 6d378a81..6eb47bb9 100644
+--- a/src/internal/syscall.h
++++ b/src/internal/syscall.h
+@@ -44,6 +44,8 @@ long __syscall_ret(unsigned long), __syscall(syscall_arg_t, ...),
+ #endif
+ #define __syscall7(n,a,b,c,d,e,f,g) (__syscall)(n,__scc(a),__scc(b),__scc(c),__scc(d),__scc(e),__scc(f),__scc(g))
+ 
++#include "syscall_libinux.h"
++
+ #define __SYSCALL_NARGS_X(a,b,c,d,e,f,g,h,n,...) n
+ #define __SYSCALL_NARGS(...) __SYSCALL_NARGS_X(__VA_ARGS__,7,6,5,4,3,2,1,0,)
+ #define __SYSCALL_CONCAT_X(a,b) a##b

@@ -67,6 +67,7 @@ HSCT_ARCHIVE_DIR="`pwd`/archives/"
 HSCT_DISABLED_CFLAGS="-Werror -Werror-implicit-function-declaration -fno-common"
 HSCT_DISABLED_LDFLAGS="--fatal-warnings"
 HSCT_CACHE_DIR=`pwd`/helenos
+HSCT_LIBC_DIR=`pwd`/libc
 HSCT_OPTS_NO_FILE_DOWNLOADING=false
 
 # Print short help.
@@ -376,7 +377,7 @@ hsct_cache_update() {
 
 	# Linker script
 	hsct_info2 "Copying linker script and startup object file"
-	_LINKER_SCRIPT=`hsct_get_var_from_uspace LINKER_SCRIPT`
+	_LINKER_SCRIPT=`hsct_get_var_from_uspace LINKER_SCRIPT Makefile.common` # LINK_DYNAMIC=y
 	(
 		set -o errexit
 		_STARTUP_OBJECT=`sed -n 's#.*STARTUP(\([^)]*\)).*#\1#p' <"$_LINKER_SCRIPT" 2>/dev/null`
@@ -394,43 +395,27 @@ hsct_cache_update() {
 	# Libraries
 	hsct_info2 "Copying libraries"
 	cp \
-		"$HSTC_HELENOS_ROOT/uspace/lib/posix/libc.a" \
-		"$HSTC_HELENOS_ROOT/uspace/lib/math/libmath.a" \
+		"$HSTC_HELENOS_ROOT/uspace/lib/softint/libsoftint.a" \
+		"$HSTC_HELENOS_ROOT/uspace/lib/softfloat/libsoftfloat.a" \
+		"$HSTC_HELENOS_ROOT/uspace/lib/inux/libinux-helenos.a" \
 		"$HSCT_CACHE_DIR/lib/"
 	if [ $? -ne 0 ]; then
 		hsct_error "Failed copying libraries to cache."
 		return 1
 	fi
 	ln -s -r -f "$HSCT_CACHE_DIR/lib/libc.a" "$HSCT_CACHE_DIR/lib/libg.a"
-	
+
 	# Headers
 	hsct_info2 "Copying headers"
 	(
 		set -o errexit
-		cp -L -R "$HSTC_HELENOS_ROOT/uspace/lib/posix/include/posix/" "$HSCT_CACHE_DIR/include/"
-		mkdir -p "$HSCT_CACHE_DIR/include/libc"
-		cp -R "$HSTC_HELENOS_ROOT/uspace/lib/c/include/"* "$HSCT_CACHE_DIR/include/libc"
-		cp -L -R "$HSTC_HELENOS_ROOT/abi/include/abi/" "$HSCT_CACHE_DIR/include/"
-		cp -L -R "$HSTC_HELENOS_ROOT/abi/include/_bits/" "$HSCT_CACHE_DIR/include/"
-		cp -L -R "$HSTC_HELENOS_ROOT/uspace/lib/c/arch/$HSCT_UARCH/include/libarch/" "$HSCT_CACHE_DIR/include/"
-		# We intentionally merge libc and libmath again (as per C standard)
-		cp -L -R "$HSTC_HELENOS_ROOT/uspace/lib/math/include/"* "$HSCT_CACHE_DIR/include/libc"
-		cp -L -R "$HSTC_HELENOS_ROOT/uspace/lib/math/arch/$HSCT_UARCH/include/libarch/" "$HSCT_CACHE_DIR/include/"
-		ln -s -f -n "libc" "$HSCT_CACHE_DIR/include/libmath"
+		mkdir -p "$HSCT_CACHE_DIR/include/"
+		cp -L -R "$HSTC_HELENOS_ROOT/abi/include/"* "$HSCT_CACHE_DIR/include/"
 	)
 	if [ $? -ne 0 ]; then
 		hsct_error "Failed copying headers to cache."
 		return 1
 	fi
-
-	hsct_info2 "Fixing includes in libc headers"
-	find "$HSCT_CACHE_DIR/include/libc" "$HSCT_CACHE_DIR/include/libarch" -name '*.h' -exec sed \
-		-e 's:#include <:#include <libc/:' \
-		-e 's:#include <libc/libarch/:#include <libarch/:' \
-		-e 's:#include <libc/abi/:#include <abi/:' \
-		-e 's:#include <libc/_bits/:#include <_bits/:' \
-		-e 's:#include <libc/libc/:#include <libc/:' \
-		-i {} \;
 	
 	# Remember the configuration
 	hsct_info2 "Saving config files"
@@ -452,6 +437,7 @@ hsct_cache_update() {
 		cp -L "$HSTC_HELENOS_ROOT/uspace/lib/clui/libclui.a" "$HSCT_CACHE_LIB"
 		mkdir -p "$HSCT_CACHE_INCLUDE/libclui/"
 		cp -L "$HSTC_HELENOS_ROOT/uspace/lib/clui/tinput.h" "$HSCT_CACHE_INCLUDE/libclui/"
+		cp -L "$HSCT_HELENOS_ROOT/uspace/lib/c/arch/$HSCT_UARCH/src/syscall.o" "$HSCT_CACHE_DIR/lib"
 	)
 	if [ $? -ne 0 ]; then
 		hsct_error "Failed copying extra headers and libraries to cache."
@@ -550,16 +536,34 @@ hsct_cache_update() {
 	# (otherwise, the ordering is crucial and we usally cannot change that in the
 	# application Makefiles).
 	_BASE_LIBS=`hsct_get_var_from_uspace BASE_LIBS |  sed 's#[ \t]\+#\n#g' | sed 's#.*/lib\(.*\).a$#\1#' | paste '-sd '`
-	_POSIX_LINK_LFLAGS="--whole-archive -lc -lmath --no-whole-archive"
-	
+	_SYSCALL_O=""
 	_LDFLAGS="$_LDFLAGS $_POSIX_LINK_LFLAGS"
 	
+	case $HSCT_UARCH in
+		ia32)
+			_SYSCALL_O="$HSCT_CACHE_DIR/lib/syscall.o"
+			;;
+		*)
+			;;
+	esac
+	_POSIX_LINK_LFLAGS="--whole-archive --start-group -lc -linux-helenos -lsoftint -lsoftfloat --end-group --no-whole-archive $_SYSCALL_O"
+
 	# The LDFLAGS might be used through CC, thus prefixing with -Wl is required
 	_LDFLAGS_FOR_CC=""
 	for _flag in $_LDFLAGS; do
 		_LDFLAGS_FOR_CC="$_LDFLAGS_FOR_CC -Wl,$_flag"
 	done
 	
+	# Reinstall MUSL
+	MUSL_HOME=`hsct_get_config "$HSCT_CONFIG" libc`
+	if [ -n "$MUSL_HOME" ]; then
+		hsct_info2 "Building musl libc"
+		make -C "$MUSL_HOME" DESTDIR="$HSCT_LIBC_DIR/PKG" install &>/dev/null
+		rm -rf "$HSCT_LIBC_DIR/include" "$HSCT_LIBC_DIR/lib"
+		cp -L -R "$HSCT_LIBC_DIR/PKG/usr/local/musl/include/" "$HSCT_LIBC_DIR/"
+		cp -L -R "$HSCT_LIBC_DIR/PKG/usr/local/musl/lib/" "$HSCT_LIBC_DIR/"
+	fi
+    
 	hsct_cache_variable HSCT_LDFLAGS "$_LDFLAGS"
 	hsct_cache_variable HSCT_LDFLAGS_FOR_CC "$_LDFLAGS_FOR_CC"
 	hsct_cache_variable HSCT_CFLAGS "$_CFLAGS"
@@ -575,13 +579,15 @@ hsct_cache_update() {
 	
 	hsct_info2 "Building specs file for GCC"
 	$HSCT_HOME/hsct-create-specs-file.py \
-		"$HSCT_CACHE_DIR" \
-		$_CFLAGS -I$HSCT_CACHE_DIR/include/posix -I$HSCT_CACHE_DIR/include/ \
+		"$PWD" \
+		$_CFLAGS_ORIGINAL -I$HSCT_CACHE_DIR/include -I$HSCT_LIBC_DIR/include/ \
 		-- \
 		$_AFLAGS \
 		-- \
-		$_LDFLAGS $_POSIX_LINK_LFLAGS -L$HSCT_CACHE_DIR/lib -n -T $_LINKER_SCRIPT \
+		$_LDFLAGS $_POSIX_LINK_LFLAGS -L$HSCT_LIBC_DIR/lib -L$HSCT_CACHE_DIR/lib -n -T $_LINKER_SCRIPT \
 		>helenos/coastline.specs
+	
+	return 0
 }
 
 # Source the env.sh if present otherwise exit with failure.
@@ -641,6 +647,13 @@ hsct_build() {
 	if [ -e "$HSCT_BUILD_DIR/${shipname}.built" ]; then
 		hsct_info "No need to build $shipname."
 		return 0
+	fi
+	
+	if ! [ -r "$HSCT_LIBC_DIR/lib/libc.a" ]; then
+	    if ! hsct_rebuild_libc; then
+	        hsct_error "Failed to rebuild libc."
+			return 1
+		fi
 	fi
 	
 	if hsct_can_update_cache; then
@@ -783,6 +796,92 @@ hsct_archive() {
 	return 0
 }
 
+# Rebuild underlying libc library.
+hsct_rebuild_libc() {
+	if hsct_can_update_cache; then
+		if ! hsct_cache_update; then 
+			return 1
+		fi
+	fi  
+
+	hsct_info "Rebuilding musl libc."
+
+	musl_version="1698fe6cdcdeaad03aa19a85433d5396ecfc51ef"
+
+	rm -rf "$HSCT_LIBC_DIR"
+	mkdir "$HSCT_LIBC_DIR"
+	if ! hsct_fetch_file "http://git.musl-libc.org/cgit/musl/snapshot/musl-$musl_version.tar.gz"; then
+		hsct_error "Failed to download musl tarball.";
+		return 1
+	fi
+
+	(
+		cd "$HSCT_LIBC_DIR"
+		tar -xzf "$HSCT_SOURCES_DIR/musl-$musl_version.tar.gz"
+		exit $?
+	) || return 1
+
+	musl_dir="$HSCT_LIBC_DIR/musl-$musl_version/"
+    
+	(
+		hsct_info2 "Patching..."
+		set -o errexit
+		
+		for patch_file in \
+				"$HSCT_HOME/musl-001.patch" \
+				"$HSCT_HOME/musl-002.patch" \
+				"$HSCT_HOME/musl-003.patch" \
+				"$HSCT_HOME/musl-004.patch" \
+				"$HSCT_HOME/musl-005.patch" \
+			; do
+			patch -d "$musl_dir" -p1 <"$patch_file" || exit 1
+		done
+		
+		rm "$musl_dir/src/thread/i386/__set_thread_area.s"
+		cp "$HSCT_HOME/musl-001.file" "$musl_dir/include/syscall_libinux.h" || exit 1
+		cp "$HSCT_HOME/musl-002.file" "$musl_dir/src/internal/helenos.c" || exit 1
+	) || return 1
+	
+	
+	(
+		cd "$musl_dir"
+		
+		hsct_info2 "Configuring..."
+		
+		. "$HSCT_CACHE_DIR/env.sh"
+		run ./configure \
+			--host="$HSCT_GNU_TARGET" \
+			--disable-shared \
+			"CC=$HSCT_CC" \
+			"CFLAGS=$HSCT_CFLAGS" \
+			"CPP=$HSCT_CC -E" \
+			"CPPFLAGS=$HSCT_CFLAGS" \
+			"AR=$HSCT_AR" \
+			"RANLIB=$HSCT_RANLIB" \
+			|| exit 1
+			
+		hsct_info2 "Building..."
+		#HSCT_PARALLELISM=24
+		run make "-j$HSCT_PARALLELISM" || exit 1
+		
+		hsct_info2 "Installing..."
+		run mkdir "PKG" || exit 1
+		run make install DESTDIR=$PWD/PKG || exit 1
+	) || return $?
+	
+	(
+		cd "$HSCT_LIBC_DIR/"
+		set -o errexit
+		
+		hsct_info2 "Moving headers and libraries..."
+		mv "musl-$musl_version/PKG/usr/local/musl/include" .
+		mv "musl-$musl_version/PKG/usr/local/musl/lib" .
+	)
+	
+	return $?
+}
+
+
 
 # Initialize current directory for coastline building.
 hsct_init() {
@@ -840,6 +939,12 @@ machine = $_machine
 parallel = 1
 EOF_CONFIG
 	hsct_cache_update
+
+	if ! hsct_rebuild_libc; then
+		hsct_error "Failed to rebuild libc."
+		return 1
+	fi
+
 	return $?
 }
 
@@ -889,7 +994,7 @@ case "$1" in
 		HSCT_HELENOS_ROOT="$2"
 		HSCT_LOAD_CONFIG=false
 		;;
-	update|clean|fetch|build|package|install|archive)
+	update|clean|fetch|build|package|install|archive|libc)
 		HSCT_LOAD_CONFIG=true
 		;;
 	*)
@@ -964,6 +1069,14 @@ case "$HSCT_ACTION" in
 		if hsct_init "$2" "$3" "$4"; then
 			leave_script_ok
 		else
+			leave_script_err
+		fi
+		;;
+	libc)
+		if hsct_rebuild_libc; then
+			leave_script_ok
+		else
+			hsct_error "Failed to rebuild libc."
 			leave_script_err
 		fi
 		;;

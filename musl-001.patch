@@ -1,0 +1,46 @@
+diff --git a/Makefile b/Makefile
+index d2e89979..1aa78e25 100644
+--- a/Makefile
++++ b/Makefile
+@@ -51,8 +51,6 @@ CFLAGS_ALL += $(CPPFLAGS) $(CFLAGS_AUTO) $(CFLAGS)
+ 
+ LDFLAGS_ALL = $(LDFLAGS_AUTO) $(LDFLAGS)
+ 
+-AR      = $(CROSS_COMPILE)ar
+-RANLIB  = $(CROSS_COMPILE)ranlib
+ INSTALL = $(srcdir)/tools/install.sh
+ 
+ ARCH_INCLUDES = $(wildcard $(srcdir)/arch/$(ARCH)/bits/*.h)
+diff --git a/configure b/configure
+index 02b736ce..7dae2bb8 100755
+--- a/configure
++++ b/configure
+@@ -183,6 +183,8 @@ CPPFLAGS=*) CPPFLAGS=${arg#*=} ;;
+ LDFLAGS=*) LDFLAGS=${arg#*=} ;;
+ CROSS_COMPILE=*) CROSS_COMPILE=${arg#*=} ;;
+ LIBCC=*) LIBCC=${arg#*=} ;;
++AR=*) AR=${arg#*=} ;;
++RANLIB=*) RANLIB=${arg#*=} ;;
+ *=*) ;;
+ *) build=$arg ; target=$arg ;;
+ esac
+@@ -602,6 +604,10 @@ test -z "$LIBCC" && try_libcc=`$CC -print-file-name=libpcc.a 2>/dev/null` \
+                  && tryldflag LIBCC "$try_libcc"
+ printf "using compiler runtime libraries: %s\n" "$LIBCC"
+ 
++# Check for AR and RANLIB
++test -z "$AR" && AR="\$(CROSS_COMPILE)ar"
++test -z "$RANLIB" && RANLIB="\$(CROSS_COMPILE)ranlib"
++
+ # Figure out arch variants for archs with variants
+ SUBARCH=
+ t="$CFLAGS_C99FSE $CPPFLAGS $CFLAGS"
+@@ -760,6 +766,8 @@ CPPFLAGS = $CPPFLAGS
+ LDFLAGS = $LDFLAGS
+ LDFLAGS_AUTO = $LDFLAGS_AUTO
+ CROSS_COMPILE = $CROSS_COMPILE
++AR = $AR
++RANLIB = $RANLIB
+ LIBCC = $LIBCC
+ OPTIMIZE_GLOBS = $OPTIMIZE_GLOBS
+ ALL_TOOLS = $tools

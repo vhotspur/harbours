@@ -1,0 +1,19 @@
+#include <stdlib.h>
+#include <string.h>
+
+void _init() __attribute__((weak));
+void _fini() __attribute__((weak));
+_Noreturn int __libc_start_main(int (*)(), int, char **,
+	void (*)(), void(*)(), void(*)());
+
+extern int main(int, char**);
+
+extern void libinux_pre_main(void *, int *, char ***);
+
+void __main(void *pcb_ptr)
+{
+	int argc;
+	char **argv;
+	libinux_pre_main(pcb_ptr, &argc, &argv);
+	__libc_start_main(main, argc, argv, _init, _fini, 0);
+}

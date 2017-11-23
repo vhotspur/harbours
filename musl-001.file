@@ -1,0 +1,23 @@
+#ifndef _INTERNAL_SYSCALL_LIBINUX_H
+#define _INTERNAL_SYSCALL_LIBINUX_H
+
+extern syscall_arg_t libinux_syscall_handler(syscall_arg_t, int,
+		syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t, syscall_arg_t);
+
+#undef __syscall0
+#undef __syscall1
+#undef __syscall2
+#undef __syscall3
+#undef __syscall4
+#undef __syscall5
+#undef __syscall6
+
+#define __syscall0(n) libinux_syscall_handler(n, 0, 0, 0, 0, 0, 0, 0)
+#define __syscall1(n,a1) libinux_syscall_handler(n, 1, __scc(a1), 0, 0, 0, 0, 0)
+#define __syscall2(n,a1,a2) libinux_syscall_handler(n, 2, __scc(a1), __scc(a2), 0, 0, 0, 0)
+#define __syscall3(n,a1,a2,a3) libinux_syscall_handler(n, 3, __scc(a1), __scc(a2), __scc(a3), 0, 0, 0)
+#define __syscall4(n,a1,a2,a3,a4) libinux_syscall_handler(n, 4, __scc(a1), __scc(a2), __scc(a3), __scc(a4), 0, 0)
+#define __syscall5(n,a1,a2,a3,a4,a5) libinux_syscall_handler(n, 5, __scc(a1), __scc(a2), __scc(a3), __scc(a4), __scc(a5), 0)
+#define __syscall6(n,a1,a2,a3,a4,a5,a6) libinux_syscall_handler(n, 6, __scc(a1), __scc(a2), __scc(a3), __scc(a4), __scc(a5), __scc(a6))
+
+#endif

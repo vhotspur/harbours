@@ -91,6 +91,13 @@ hsct_usage() {
 	echo "    Full path has to be provided to the HelenOS source tree."
 	echo "    If profile is specified, prepare for that configuration."
 	echo "    If 'build' is given, forcefully rebuild to specified profile."
+	echo " $1 libc"
+	echo "    Rebuild libc (musl at the moment)."
+	echo " $1 musl-configure"
+	echo "    Configure musl libc in external directory."
+	echo " $1 musl-patch"
+	echo "    Patch musl libc in external directory with HelenOS-specific"
+	echo "    patches (shall not be called twice)."
 	echo " $1 help"
 	echo "    Display this help and exit."
 }
@@ -796,37 +803,18 @@ hsct_archive() {
 	return 0
 }
 
-# Rebuild underlying libc library.
-hsct_rebuild_libc() {
-	if hsct_can_update_cache; then
-		if ! hsct_cache_update; then 
-			return 1
-		fi
-	fi  
+hsct_musl_patch() {
+	MUSL_DIR="$1"
 
-	hsct_info "Rebuilding musl libc."
-
-	musl_version="1698fe6cdcdeaad03aa19a85433d5396ecfc51ef"
-
-	rm -rf "$HSCT_LIBC_DIR"
-	mkdir "$HSCT_LIBC_DIR"
-	if ! hsct_fetch_file "http://git.musl-libc.org/cgit/musl/snapshot/musl-$musl_version.tar.gz"; then
-		hsct_error "Failed to download musl tarball.";
+	if [ -z "$MUSL_DIR" ]; then
+		hsct_error "musl directory not given."
 		return 1
 	fi
 
 	(
-		cd "$HSCT_LIBC_DIR"
-		tar -xzf "$HSCT_SOURCES_DIR/musl-$musl_version.tar.gz"
-		exit $?
-	) || return 1
-
-	musl_dir="$HSCT_LIBC_DIR/musl-$musl_version/"
-    
-	(
-		hsct_info2 "Patching..."
+		hsct_info "Patching musl ..."
 		set -o errexit
-		
+
 		for patch_file in \
 				"$HSCT_HOME/musl-001.patch" \
 				"$HSCT_HOME/musl-002.patch" \
@@ -834,20 +822,28 @@ hsct_rebuild_libc() {
 				"$HSCT_HOME/musl-004.patch" \
 				"$HSCT_HOME/musl-005.patch" \
 			; do
-			patch -d "$musl_dir" -p1 <"$patch_file" || exit 1
+			patch -d "$MUSL_DIR" -p1 <"$patch_file" || exit 1
 		done
-		
-		rm "$musl_dir/src/thread/i386/__set_thread_area.s"
-		cp "$HSCT_HOME/musl-001.file" "$musl_dir/include/syscall_libinux.h" || exit 1
-		cp "$HSCT_HOME/musl-002.file" "$musl_dir/src/internal/helenos.c" || exit 1
+
+		rm "$MUSL_DIR/src/thread/i386/__set_thread_area.s"
+		cp "$HSCT_HOME/musl-001.file" "$MUSL_DIR/include/syscall_libinux.h" || exit 1
+		cp "$HSCT_HOME/musl-002.file" "$MUSL_DIR/src/internal/helenos.c" || exit 1
 	) || return 1
-	
-	
+}
+
+hsct_musl_configure() {
+	MUSL_DIR="$1"
+
+	if [ -z "$MUSL_DIR" ]; then
+		hsct_error "musl directory not given."
+		return 1
+	fi
+
 	(
-		cd "$musl_dir"
-		
-		hsct_info2 "Configuring..."
-		
+		cd "$1"
+
+		hsct_info2 "Configuring musl ..."
+
 		. "$HSCT_CACHE_DIR/env.sh"
 		run ./configure \
 			--host="$HSCT_GNU_TARGET" \
@@ -859,24 +855,87 @@ hsct_rebuild_libc() {
 			"AR=$HSCT_AR" \
 			"RANLIB=$HSCT_RANLIB" \
 			|| exit 1
-			
-		hsct_info2 "Building..."
-		#HSCT_PARALLELISM=24
-		run make "-j$HSCT_PARALLELISM" || exit 1
-		
-		hsct_info2 "Installing..."
-		run mkdir "PKG" || exit 1
-		run make install DESTDIR=$PWD/PKG || exit 1
 	) || return $?
+}
+
+# Sets MUSL_HOME
+hsct_musl_prepare_from_upstream() {
+	musl_version="1698fe6cdcdeaad03aa19a85433d5396ecfc51ef"
 	
+	run rm -rf "$HSCT_LIBC_DIR/musl-$musl_version"
+	run mkdir -p "$HSCT_LIBC_DIR"
+	if ! hsct_fetch_file "http://git.musl-libc.org/cgit/musl/snapshot/musl-$musl_version.tar.gz"; then
+		hsct_error "Failed to download musl tarball.";
+		return 1
+	fi
+
+	(
+		cd "$HSCT_LIBC_DIR"
+		run tar -xzf "$HSCT_SOURCES_DIR/musl-$musl_version.tar.gz"
+		exit $?
+	) || return 1
+
+	MUSL_HOME="$HSCT_LIBC_DIR/musl-$musl_version/"
+    
+	hsct_musl_patch "$MUSL_HOME" || return 1
+	hsct_musl_configure "$MUSL_HOME" || return 1
+}
+
+hsct_musl_update() {
+	hsct_info "Updating musl libc."
+
+	MUSL_HOME=`hsct_get_config "$HSCT_CONFIG" musl`
+	MUSL_INSTALL_DIR="$HSCT_LIBC_DIR/inst/"
+
+	if [ -z "$MUSL_HOME" ]; then
+		_LIBC_PATH="$HSCT_LIBC_DIR/lib/libc.a"
+		if [ -r "$_LIBC_PATH" ]; then
+			hsct_info2 "libc.a already exists, nothing will be done."
+			hsct_info2 "Remove $_LIBC_PATH to force fresh rebuild."
+			return 0
+		else
+			hsct_info2 "Rebuilding musl from scratch."
+
+			# Expected to set MUSL_HOME
+			hsct_musl_prepare_from_upstream || return 1
+		fi
+	fi
+
+	[ -z "$MUSL_HOME" ] && return 1
+	
+
+	hsct_info2 "Removing installation directory..."
+	run rm -rf "$MUSL_INSTALL_DIR" || exit 1
+	run mkdir -p "$MUSL_INSTALL_DIR" || exit 1
+
+	(
+		hsct_info2 "Building musl..."
+		cd "$MUSL_HOME" || exit 1
+		run make "-j$HSCT_PARALLELISM" || exit 1
+		run rm -rf "$MUSL_INSTALL_DIR"
+		run make install "DESTDIR=$MUSL_INSTALL_DIR" || exit 1
+	) || return 1
+
 	(
 		cd "$HSCT_LIBC_DIR/"
 		set -o errexit
 		
 		hsct_info2 "Moving headers and libraries..."
-		mv "musl-$musl_version/PKG/usr/local/musl/include" .
-		mv "musl-$musl_version/PKG/usr/local/musl/lib" .
+		run rm -rf lib include
+		run mv "$MUSL_INSTALL_DIR/usr/local/musl/include" .
+		run mv "$MUSL_INSTALL_DIR/usr/local/musl/lib" .
 	)
+}
+
+# Rebuild underlying libc library.
+hsct_update_libc() {
+	if hsct_can_update_cache; then
+		if ! hsct_cache_update; then 
+			return 1
+		fi
+	fi
+
+	hsct_musl_update
 	
 	return $?
 }
@@ -940,7 +999,7 @@ parallel = 1
 EOF_CONFIG
 	hsct_cache_update
 
-	if ! hsct_rebuild_libc; then
+	if ! hsct_update_libc; then
 		hsct_error "Failed to rebuild libc."
 		return 1
 	fi
@@ -997,6 +1056,9 @@ case "$1" in
 	update|clean|fetch|build|package|install|archive|libc)
 		HSCT_LOAD_CONFIG=true
 		;;
+	musl-patch|musl-configure)
+		HSCT_LOAD_CONFIG=true
+		;;
 	*)
 		hsct_usage "$0"
 		leave_script_err
@@ -1014,6 +1076,7 @@ if $HSCT_LOAD_CONFIG; then
 	HSCT_HELENOS_MACHINE=`hsct_get_config "$HSCT_CONFIG" machine`
 	HSCT_PARALLELISM=`hsct_get_config "$HSCT_CONFIG" parallel`
 	HSCT_WGET_OPTS=`hsct_get_config "$HSCT_CONFIG" wget_opts`
+	HSCT_MUSL_HOME=`hsct_get_config "$HSCT_CONFIG" musl`
 	
 	if [ -z "$HSCT_HELENOS_ARCH" ]; then
 		hsct_error "I don't know for which architecture you want to build."
@@ -1072,8 +1135,22 @@ case "$HSCT_ACTION" in
 			leave_script_err
 		fi
 		;;
+	musl-patch)
+		if hsct_musl_patch "$HSCT_MUSL_HOME"; then
+			leave_script_ok
+		else
+			leave_script_err
+		fi
+		;;
+	musl-configure)
+		if hsct_musl_configure "$HSCT_MUSL_HOME"; then
+			leave_script_ok
+		else
+			leave_script_err
+		fi
+		;;
 	libc)
-		if hsct_rebuild_libc; then
+		if hsct_update_libc; then
 			leave_script_ok
 		else
 			hsct_error "Failed to rebuild libc."

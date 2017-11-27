@@ -657,7 +657,7 @@ hsct_build() {
 	fi
 	
 	if ! [ -r "$HSCT_LIBC_DIR/lib/libc.a" ]; then
-	    if ! hsct_rebuild_libc; then
+	    if ! hsct_update_libc; then
 	        hsct_error "Failed to rebuild libc."
 			return 1
 		fi

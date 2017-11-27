@@ -34,7 +34,6 @@
 #include "libiberty.h"
 #include "pex-common.h"
 
-#include <libc/task.h>
 #include <assert.h>
 #include <string.h>
 #include <fcntl.h>
@@ -42,6 +41,43 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <errno.h>
+
+#define IPC_CALL_LEN  6
+
+typedef uintptr_t sysarg_t;
+typedef uint64_t task_id_t;
+typedef sysarg_t ipc_callid_t;
+typedef ipc_callid_t aid_t;
+
+typedef enum {
+	TASK_EXIT_NORMAL,
+	TASK_EXIT_UNEXPECTED
+} task_exit_t;
+
+
+typedef struct {
+	sysarg_t args[IPC_CALL_LEN];
+	task_id_t in_task_id;
+	sysarg_t in_phone_hash;
+} ipc_call_t;
+
+
+typedef struct {
+	ipc_call_t result;
+	aid_t aid;
+} task_wait_t;
+
+struct _TASK;
+typedef struct _TASK task_t;
+
+extern int __helenos_libc_task_kill(task_id_t);
+extern int __helenos_libc_task_spawnvf(task_id_t *, task_wait_t *, const char *path,
+    const char *const [], int, int, int);
+extern int __helenos_libc_task_wait(task_wait_t *, task_exit_t *, int *);
+
+
+
 
 struct pex_task_wait {
 	task_wait_t task_wait;
@@ -95,7 +131,7 @@ static pid_t pex_helenos_exec_child(struct pex_obj *obj,
 	char full_path[1024];
 	// FIXME: decide on paths
 	snprintf(full_path, 1023, "/app/%s", executable);
-	int rc = task_spawnvf(&this_task->task_id, &this_task->task_wait,
+	int rc = __helenos_libc_task_spawnvf(&this_task->task_id, &this_task->task_wait,
 		full_path, argv, in, out, errdes);
 	
 	if (rc != 0) {
@@ -140,7 +176,7 @@ static int pex_helenos_wait(struct pex_obj *obj,
 	 * mercilessly.
 	 */
 	if (done) {
-		task_kill(this_task->task_id);
+		__helenos_libc_task_kill(this_task->task_id);
 	}
 	
 	if (time != NULL) {
@@ -149,7 +185,7 @@ static int pex_helenos_wait(struct pex_obj *obj,
 	
 	task_exit_t task_exit;
 	int task_retval;
-	int rc = task_wait(&this_task->task_wait, &task_exit, &task_retval);
+	int rc = __helenos_libc_task_wait(&this_task->task_wait, &task_exit, &task_retval);
 
 	if (rc != 0) {
 		*err = -rc;

@@ -1,0 +1,20 @@
+diff --git a/configure b/configure
+--- a/configure
++++ b/configure
+@@ -454,16 +454,6 @@ fi
+ # Always try -pipe
+ tryflag CFLAGS_AUTO -pipe
+ 
+-#
+-# If debugging is disabled, omit frame pointer. Modern GCC does this
+-# anyway on most archs even when debugging is enabled since the frame
+-# pointer is no longer needed for debugging.
+-#
+-if fnmatch '-g*|*\ -g*' "$CFLAGS_AUTO $CFLAGS" ; then :
+-else 
+-tryflag CFLAGS_AUTO -fomit-frame-pointer
+-fi
+-
+ #
+ # Modern GCC wants to put DWARF tables (used for debugging and
+ # unwinding) in the loaded part of the program where they are

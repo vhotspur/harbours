@@ -1,0 +1,15 @@
+diff --git a/src/errno/__errno_location.c b/src/errno/__errno_location.c
+index 7172a1be..0916f454 100644
+--- a/src/errno/__errno_location.c
++++ b/src/errno/__errno_location.c
+@@ -1,6 +1,9 @@
+ #include "pthread_impl.h"
+ 
++// HelenOS/libinux - assuming no multithreaded support
++static int actual_errno;
++
+ int *__errno_location(void)
+ {
+-	return &__pthread_self()->errno_val;
++	return &actual_errno;
+ }

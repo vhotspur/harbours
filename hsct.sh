@@ -821,6 +821,8 @@ hsct_musl_patch() {
 				"$HSCT_HOME/musl-003.patch" \
 				"$HSCT_HOME/musl-004.patch" \
 				"$HSCT_HOME/musl-005.patch" \
+				"$HSCT_HOME/musl-006.patch" \
+				"$HSCT_HOME/musl-007.patch" \
 			; do
 			patch -d "$MUSL_DIR" -p1 <"$patch_file" || exit 1
 		done

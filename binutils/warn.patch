@@ -1,0 +1,39 @@
+diff -ud binutils/elfcomm.c binutils/elfcomm.c
+--- binutils/elfcomm.c	2017-07-10 11:54:41.000000000 +0200
++++ binutils/elfcomm.c	2017-11-24 13:14:24.770480365 +0100
+@@ -44,20 +44,6 @@
+   va_end (args);
+ }
+ 
+-void
+-warn (const char *message, ...)
+-{
+-  va_list args;
+-
+-  /* Try to keep warning messages in sync with the program's normal output.  */
+-  fflush (stdout);
+-
+-  va_start (args, message);
+-  fprintf (stderr, _("%s: Warning: "), program_name);
+-  vfprintf (stderr, message, args);
+-  va_end (args);
+-}
+-
+ void (*byte_put) (unsigned char *, elf_vma, int);
+ 
+ void
+diff -ud binutils/elfcomm.h binutils/elfcomm.h
+--- binutils/elfcomm.h	2017-07-10 11:54:41.000000000 +0200
++++ binutils/elfcomm.h	2017-11-24 13:11:07.875193553 +0100
+@@ -25,9 +25,10 @@
+ #define _ELFCOMM_H
+ 
+ #include "aout/ar.h"
++#include <err.h>
+ 
+ void error (const char *, ...) ATTRIBUTE_PRINTF_1;
+-void warn (const char *, ...) ATTRIBUTE_PRINTF_1;
++//void warn (const char *, ...) ATTRIBUTE_PRINTF_1;
+ 
+ typedef unsigned HOST_WIDEST_INT elf_vma;
+ 

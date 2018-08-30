@@ -39,6 +39,176 @@ import re
 import yaml
 from pyparsing import line
 
+def strip_heredoc(text):
+    return '\n'.join([l.strip() for l in text.splitlines()])
+
+class CoastlineEnvironment:
+    VARIABLE_PATTERN = re.compile('^(?P<VARIABLE>[a-zA-Z_][a-zA-Z0-9_]*)="(?P<VALUE>.*)"$')
+    
+    VARIABLE_SETTING_TEMPLATE_ = """
+    export HSCT_REAL_CC="$HELENOS_TARGET-gcc"
+    export HSCT_REAL_CXX="$HELENOS_TARGET-g++"
+
+    export HSCT_INCLUDE_DIR="$HSCT_BUILD_BASE/include"
+    export HSCT_LIB_DIR="$HSCT_BUILD_BASE/lib"
+
+    export HSCT_ARFLAGS="$HELENOS_ARFLAGS"
+    export HSCT_CPPFLAGS="-isystem $HSCT_INCLUDE_DIR $HELENOS_CPPFLAGS"
+    export HSCT_CFLAGS="$HELENOS_CFLAGS"
+    export HSCT_CXXFLAGS="$HELENOS_CXXFLAGS"
+    export HSCT_ASFLAGS="$HELENOS_ASFLAGS"
+    export HSCT_LDFLAGS="-L $HSCT_LIB_DIR $HELENOS_LDFLAGS"
+    export HSCT_LDLIBS="$HELENOS_LDLIBS"
+    
+    export HSCT_TARGET="$HELENOS_ARCH-helenos"
+    export HSCT_CC="$HSCT_TARGET-cc"
+    export HSCT_CXX="$HSCT_TARGET-cxx"
+    export HSCT_REAL_TARGET="$HELENOS_TARGET"
+    export HSCT_CCROSS_TARGET="$HELENOS_ARCH-linux-gnu"
+    
+    export HSCT_FACADE_DIR="{facade}"
+
+    export PATH="$HSCT_FACADE_DIR:$HELENOS_CROSS_PATH:$PATH"
+    """
+    
+    VARIABLE_SETTING_TEMPLATE = strip_heredoc(VARIABLE_SETTING_TEMPLATE_)
+    
+    def __init__(self, base_dir):
+        self.base_dir = base_dir
+        self.config = self.load()
+    
+    def load(self):
+        cfg = {}
+        with open(os.path.join(self.base_dir, 'helenos', 'config.rc')) as f:
+            for line in f:
+                m = CoastlineEnvironment.VARIABLE_PATTERN.match(line)
+                if m is None:
+                    continue
+                cfg[m.group("VARIABLE")] = m.group("VALUE")
+        return cfg
+    
+    def get_vars(self):
+        output = 'export HELENOS_EXPORT_ROOT="{}"\n'.format(os.path.join(self.base_dir, 'helenos'))
+        output = output + 'export HELENOS_BUILD_BASE="{}"\n'.format(self.base_dir)
+        for var in self.config:
+            output = output + 'export {}="{}"\n'.format(var, self.config[var])
+        output = output + '\n\n' + CoastlineEnvironment.VARIABLE_SETTING_TEMPLATE.format(
+            facade=os.path.join(self.base_dir, 'facade')
+        )
+        return output
+
+    def get(self, name, extra_param=None):
+        if name == 'build':
+            if extra_param is None:
+                return os.path.join(self.base_dir, 'build')
+            else:
+                return os.path.join(self.base_dir, 'build', extra_param)
+        elif name == 'sources':
+            return os.path.join(self.base_dir, 'sources')
+        assert False
+
+class Harbour:
+    HARBOUR_SCRIPT_ = """#!/bin/bash
+    set -x
+
+    export shipname="{name}"
+    export shipversion="{version}"
+    export shipfunnels=1
+    
+    {variables}
+    
+    run() {{ "$@"; }}
+    
+    {script}
+
+    (
+        cd {harbour_build_dir}
+        build
+    )
+
+    """
+    
+    HARBOUR_SCRIPT = strip_heredoc(HARBOUR_SCRIPT_)
+    
+    def __init__(self, name, base_dir, env):
+        self.name = name
+        self.base_dir = base_dir
+        self.env = env
+        
+        self.home = os.path.dirname(os.path.realpath(sys.argv[0]))
+        self.info = self.load_(name)
+    
+    def load_(self, name):
+        script = ''
+        yaml_content = ''
+    
+        with open(os.path.join(self.home, self.name, 'HARBOUR.yml')) as f:
+            in_yaml = False
+            for line in f:
+                if line == '---\n':
+                    in_yaml = True
+                    continue
+                if line == '```\n':
+                    in_yaml = False
+                    continue
+                if in_yaml:
+                    yaml_content = yaml_content + line
+                else:
+                    script = script + line
+    
+        info = yaml.load(yaml_content)
+        info['script'] = script
+        info['homedir'] = os.path.join(SELF_HOME, self.name)
+    
+        assert(self.name == info['name'])
+    
+        if 'version' not in info:
+            info['version'] = ''
+    
+        if 'sources' in info:
+            sources = []
+            for s in info['sources']:
+                if type(s) is str:
+                    s = s.replace('${name}', info['name']).replace('${version}', info['version'])
+                    src = {
+                        'url': s,
+                        'dest': os.path.basename(s),
+                    }
+                else:
+                    continue
+                sources.append(src)
+            info['sources'] = sources
+        else:
+            info['sources'] = []
+    
+        return info
+    
+    def get_script(self):
+        script = Harbour.HARBOUR_SCRIPT.format(
+            name=self.name,
+            version=self.info['version'],
+            variables=self.env.get_vars(),
+            script=self.info['script'],
+            harbour_build_dir=os.path.join(self.base_dir, 'build', self.name)
+        )
+        
+        return script
+
+    def prebuild(self):
+        target_dir = self.env.get('build', self.name)
+        os.makedirs(target_dir, exist_ok=True)
+        for s in self.info['sources']:
+            if s['dest'] == s['url']:
+                src = os.path.join(self.home, self.name, s['dest'])
+            else:
+                src = os.path.join(self.env.get('sources'), s['dest'])
+            run_command([
+                'ln',
+                '-srf',
+                src,
+                os.path.join(target_dir, s['dest'])
+            ])
+
 SELF_HOME = os.path.dirname(os.path.realpath(sys.argv[0]))
 
 def format_command(cmd):
@@ -55,18 +225,6 @@ def run_command(command, wd=None):
     proc.wait()
     if proc.returncode != 0:
         raise Exception("Command {} failed.".format(command))
-
-def load_config():
-    VARIABLE_PATTERN = re.compile('^(?P<VARIABLE>[a-zA-Z_][a-zA-Z0-9_]*)="(?P<VALUE>.*)"$')
-
-    cfg = {}
-    with open('helenos/config.rc') as f:
-        for line in f:
-            m = VARIABLE_PATTERN.match(line)
-            if m is None:
-                continue
-            cfg[m.group("VARIABLE")] = m.group("VALUE")
-    return cfg
 
 def import_libposix(helenos_root, target_dir):
     logger = logging.getLogger('import_libposix')
@@ -100,50 +258,6 @@ def install_facade_binaries(target_dir):
         ])
 
 
-def load_harbour(harbour_name):
-    script = ''
-    yaml_content = ''
-
-    with open(os.path.join(SELF_HOME, harbour_name, 'HARBOUR.yml')) as f:
-        in_yaml = False
-        for line in f:
-            if line == '---\n':
-                in_yaml = True
-                continue
-            if line == '```\n':
-                in_yaml = False
-                continue
-            if in_yaml:
-                yaml_content = yaml_content + line
-            else:
-                script = script + line
-
-    info = yaml.load(yaml_content)
-    info['script'] = script
-
-    assert(harbour_name == info['name'])
-
-    if 'version' not in info:
-        info['version'] = ''
-
-    if 'sources' in info:
-        sources = []
-        for s in info['sources']:
-            if type(s) is str:
-                s = s.replace('${name}', info['name']).replace('${version}', info['version'])
-                src = {
-                    'url': s,
-                    'dest': os.path.basename(s),
-                }
-            else:
-                continue
-            sources.append(src)
-        info['sources'] = sources
-    else:
-        info['sources'] = []
-
-    return info
-
 
 def fetch_sources(harbour_info, target_dir):
     os.makedirs(target_dir, exist_ok=True)
@@ -173,6 +287,14 @@ args_fetch.add_argument('harbour',
     help='Harbour name.'
 )
 
+args_build = args_sub.add_parser('build', help='Build given harbour')
+args_build.set_defaults(action='build')
+args_build.add_argument('harbour',
+    metavar='HARBOUR_NAME',
+    nargs=1,
+    help='Harbour name.'
+)
+
 args.add_argument('--debug',
     dest='debug',
     default=False,
@@ -192,6 +314,8 @@ logging.basicConfig(
     level=config.logging_level
 )
 
+env = CoastlineEnvironment(os.getcwd())
+
 logger = logging.getLogger('main')
 
 if config.action == 'init':
@@ -200,5 +324,17 @@ if config.action == 'init':
     import_libposix(config.helenos_root[0], helenos_dir)
     install_facade_binaries(os.path.join(wd, 'facade'))
 elif config.action == 'fetch':
+    harbour = Harbour(config.harbour[0], os.getcwd(), env)
     info = load_harbour(config.harbour[0])
     fetch_sources(info, os.path.join(os.getcwd(), 'sources'))
+elif config.action == 'build':
+    harbour = Harbour(config.harbour[0], os.getcwd(), env)
+
+    #fetch_sources(info, os.path.join(os.getcwd(), 'sources'))
+    #build_harbour(info, os.path.join(os.getcwd(), 'build'))
+
+    harbour.prebuild()
+    build_script = harbour.get_script()
+    filename = os.path.join(env.get('build'), 'build-{}.sh'.format(harbour.name))
+    with open(filename, 'w') as f:
+        print(build_script, file=f)
